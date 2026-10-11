@@ -8,7 +8,7 @@ sdk_version: 5.20.0
 app_file: app.py
 pinned: false
 license: mit
-short_description: DL Project - Automatic Helmet & Number Plate Violation Detection
+short_description: Helmet and Plate Detection DL Project
 ---
 
 # 🪖 Smart Helmet Violation & Challan Detection System
