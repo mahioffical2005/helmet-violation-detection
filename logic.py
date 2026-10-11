@@ -61,6 +61,59 @@ def get_ocr_reader():
         _ocr_reader = None
     return _ocr_reader
 
+INDIAN_STATE_CODES = [
+    "AN","AP","AR","AS","BR","CH","CG","DD","DL","DN","GA","GJ","HP",
+    "HR","JH","JK","KA","KL","LA","LD","MH","ML","MN","MP","MZ","NL",
+    "OD","OR","PB","PY","RJ","SK","TN","TR","TS","UK","UP","WB"
+]
+
+def format_indian_plate(tokens):
+    """
+    Reconstructs standard Indian vehicle plate format (e.g. TN 09 CF 7722).
+    State Code (2) + District (2) + Series (1-2) + Number (4).
+    Handles single-line and multi-line plate layouts.
+    """
+    cleaned_tokens = [re.sub(r'[^A-Z0-9]', '', t.upper()) for t in tokens if t.strip()]
+    
+    # 1. Look for token that starts with state code
+    state_idx = -1
+    for i, t in enumerate(cleaned_tokens):
+        for code in INDIAN_STATE_CODES:
+            if t.startswith(code):
+                state_idx = i
+                break
+        if state_idx != -1:
+            break
+
+    # If state code token is found later (e.g. bottom line read first), reorder so state line is first
+    if state_idx > 0:
+        reordered = cleaned_tokens[state_idx:] + cleaned_tokens[:state_idx]
+    else:
+        reordered = cleaned_tokens
+
+    combined = "".join(reordered)
+
+    # Search for state code inside combined
+    for code in INDIAN_STATE_CODES:
+        pos = combined.find(code)
+        if pos != -1:
+            # Reconstruct string starting from state code
+            candidate = combined[pos:] + combined[:pos]
+            # Pattern: State(2) + Num(1-2) + Letters(1-3) + Num(3-4)
+            m = re.match(r'^([A-Z]{2})([0-9]{1,2})([A-Z]{1,3})([0-9]{3,4})', candidate)
+            if m:
+                return f"{m.group(1)} {m.group(2).zfill(2)} {m.group(3)} {m.group(4)}"
+            
+            # Pattern: State(2) + Letters(1-3) + Num(3-4)
+            m_short = re.match(r'^([A-Z]{2})([A-Z]{1,3})([0-9]{3,4})', candidate)
+            if m_short:
+                return f"{m_short.group(1)} {m_short.group(2)} {m_short.group(3)}"
+            
+            # If at least state code followed by something
+            return candidate
+
+    return " ".join(cleaned_tokens)
+
 def clean_plate_text(text: str) -> str:
     """Cleans raw OCR text into standard uppercase alphanumeric registration number format."""
     if not text:
@@ -188,13 +241,27 @@ def detect_violation(image_input, conf_threshold: float = 0.20):
             try:
                 gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
                 # Resize if crop is too small for OCR
-                if gray_crop.shape[0] < 50:
-                    scale = 60 / max(1, gray_crop.shape[0])
+                if gray_crop.shape[0] < 60:
+                    scale = 80 / max(1, gray_crop.shape[0])
                     gray_crop = cv2.resize(gray_crop, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
+                
                 ocr_out = reader.readtext(gray_crop)
-                valid_words = [r[1] for r in ocr_out if r[2] >= 0.12]
-                raw_text = " ".join(valid_words)
-                plate_str = clean_plate_text(raw_text)
+                # Filter valid text items
+                valid_items = [r for r in ocr_out if r[2] >= 0.10 and len(r[1].strip()) > 0]
+                
+                # Sort spatially: top-to-bottom, then left-to-right
+                # r[0] is list of 4 bbox points [[x1,y1], [x2,y1], [x2,y2], [x1,y2]]
+                def get_sort_key(item):
+                    box_pts = item[0]
+                    y_center = (box_pts[0][1] + box_pts[2][1]) / 2.0
+                    x_center = (box_pts[0][0] + box_pts[2][0]) / 2.0
+                    # Group by horizontal line bands (30px)
+                    line_band = int(y_center / 30.0)
+                    return (line_band, x_center)
+                
+                valid_items.sort(key=get_sort_key)
+                tokens = [r[1] for r in valid_items]
+                plate_str = format_indian_plate(tokens)
             except Exception as e:
                 print(f"[DL Logic] OCR exception: {e}")
 
