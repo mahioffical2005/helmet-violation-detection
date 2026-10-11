@@ -21,7 +21,7 @@ def create_app():
             with gr.Column(scale=1):
                 image_input = gr.Image(
                     label="📤 Upload Rider / Traffic Photo",
-                    type="numpy",
+                    type="pil",
                     sources=["upload", "clipboard", "webcam"],
                     elem_id="input_image"
                 )
