@@ -4,7 +4,7 @@ emoji: 🪖
 colorFrom: indigo
 colorTo: blue
 sdk: gradio
-sdk_version: 5.20.0
+sdk_version: 4.44.1
 app_file: app.py
 pinned: false
 license: mit
@@ -14,6 +14,12 @@ short_description: Helmet and Plate Detection DL Project
 # 🪖 Smart Helmet Violation & Challan Detection System
 > **Deep Learning Class Project**  
 > Automated Motorcycle Safety Compliance & E-Challan Issuance
+
+---
+
+## 🌐 Live Hugging Face Space & GitHub
+- 🔗 **Live Web App on Hugging Face:** **[https://huggingface.co/spaces/mahi-project/video](https://huggingface.co/spaces/mahi-project/video)**
+- 🐙 **GitHub Repository:** **[https://github.com/mahioffical2005/helmet-violation-detection](https://github.com/mahioffical2005/helmet-violation-detection)**
 
 ---
 

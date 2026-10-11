@@ -1,4 +1,4 @@
-gradio>=4.0.0
+gradio==4.44.1
 ultralytics>=8.0.0
 easyocr>=1.7.0
 opencv-python-headless
