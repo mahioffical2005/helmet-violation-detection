@@ -81,11 +81,13 @@ def create_app():
    - Under **Section 129 of the Motor Vehicles Act**, riding without a helmet incurs an automated penalty of **₹1,000 fine** and e-challan generation.
             """)
 
-        # Event binding
+        # Event binding with show_api=False to avoid schema serialization bug
         submit_btn.click(
             fn=detect_violation,
             inputs=[image_input, conf_slider],
-            outputs=[annotated_output, status_output, fine_output, plate_output, report_output]
+            outputs=[annotated_output, status_output, fine_output, plate_output, report_output],
+            api_name=False,
+            show_api=False
         )
 
         clear_btn.add([annotated_output, status_output, fine_output, plate_output, report_output])
