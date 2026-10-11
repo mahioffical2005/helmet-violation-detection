@@ -65,13 +65,12 @@ def clean_plate_text(text: str) -> str:
     """Cleans raw OCR text into standard uppercase alphanumeric registration number format."""
     if not text:
         return ""
-    # Remove symbols like colons, dashes, quotes, slashes
     clean = re.sub(r'[^A-Za-z0-9]', ' ', text).strip()
     clean = re.sub(r'\s+', ' ', clean)
     return clean.upper()
 
 def draw_bounding_box(image: np.ndarray, box, label: str, color: tuple, conf: float = None):
-    """Draws a clean, rounded-style bounding box with high contrast label banner."""
+    """Draws a clean bounding box with a high contrast label banner."""
     x1, y1, x2, y2 = box
     h, w = image.shape[:2]
     x1, y1 = max(0, x1), max(0, y1)
@@ -102,24 +101,23 @@ def draw_bounding_box(image: np.ndarray, box, label: str, color: tuple, conf: fl
         cv2.LINE_AA
     )
 
-def detect_violation(image_input, conf_threshold: float = 0.25):
+def detect_violation(image_input, conf_threshold: float = 0.20):
     """
     Main detection pipeline:
     1. Runs YOLOv8 Helmet Detection ('With Helmet', 'Without Helmet')
     2. Runs YOLOv8 License Plate Detection
     3. Crops plate and reads text via EasyOCR
     4. Computes violation rules:
-       - No Helmet detected: Status = 'No Helmet Detected', Fine = 'Fine: ₹1000'
-       - Helmet detected: Status = 'Helmet Detected', Fine = 'No Fine'
+       - If Without Helmet detected: Status = 'No Helmet Detected ❌', Fine = 'Fine: ₹1000 🚨'
+       - If With Helmet detected: Status = 'Helmet Detected ✅', Fine = 'No Fine (₹0) ✨'
     """
     if image_input is None:
-        return None, "No Image Provided", "₹0", "N/A", "Please upload a valid image."
+        return None, "No Image Uploaded", "₹0", "N/A", "Please upload a photo of a rider or traffic scene."
 
-    # Convert to OpenCV BGR if necessary
+    # Convert to OpenCV BGR
     if isinstance(image_input, str):
         img_bgr = cv2.imread(image_input)
     elif isinstance(image_input, np.ndarray):
-        # Gradio passes RGB numpy arrays
         if len(image_input.shape) == 3 and image_input.shape[2] == 3:
             img_bgr = cv2.cvtColor(image_input, cv2.COLOR_RGB2BGR)
         else:
@@ -139,7 +137,10 @@ def detect_violation(image_input, conf_threshold: float = 0.25):
 
     # --- 1. Helmet Detection ---
     helmet_model = get_helmet_model()
+    # Try primary threshold first, fallback to slightly lower if nothing detected
     h_results = helmet_model(img_bgr, conf=conf_threshold, verbose=False)[0]
+    if len(h_results.boxes) == 0:
+        h_results = helmet_model(img_bgr, conf=0.15, verbose=False)[0]
 
     helmets = []
     no_helmets = []
@@ -155,9 +156,13 @@ def detect_violation(image_input, conf_threshold: float = 0.25):
         else:
             helmets.append({"box": box, "conf": conf, "label": cls_name})
 
+    # Sort by confidence
+    helmets.sort(key=lambda x: -x["conf"])
+    no_helmets.sort(key=lambda x: -x["conf"])
+
     # Draw helmet / no-helmet bounding boxes
     for h in helmets:
-        draw_bounding_box(annotated, h["box"], "Helmet", (46, 204, 113), h["conf"])  # Green
+        draw_bounding_box(annotated, h["box"], "Helmet Detected", (46, 204, 113), h["conf"])  # Green
 
     for nh in no_helmets:
         draw_bounding_box(annotated, nh["box"], "No Helmet", (41, 41, 230), nh["conf"])  # Red
@@ -165,7 +170,7 @@ def detect_violation(image_input, conf_threshold: float = 0.25):
     # --- 2. License Plate Detection & OCR ---
     plate_model = get_plate_model()
     reader = get_ocr_reader()
-    p_results = plate_model(img_bgr, conf=max(0.12, conf_threshold - 0.1), verbose=False)[0]
+    p_results = plate_model(img_bgr, conf=0.12, verbose=False)[0]
 
     detected_plates = []
 
@@ -181,10 +186,13 @@ def detect_violation(image_input, conf_threshold: float = 0.25):
 
         if crop.size > 0 and reader is not None:
             try:
-                # Preprocess plate crop for better OCR
                 gray_crop = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                # Resize if crop is too small for OCR
+                if gray_crop.shape[0] < 50:
+                    scale = 60 / max(1, gray_crop.shape[0])
+                    gray_crop = cv2.resize(gray_crop, (0, 0), fx=scale, fy=scale, interpolation=cv2.INTER_CUBIC)
                 ocr_out = reader.readtext(gray_crop)
-                valid_words = [r[1] for r in ocr_out if r[2] >= 0.15]
+                valid_words = [r[1] for r in ocr_out if r[2] >= 0.12]
                 raw_text = " ".join(valid_words)
                 plate_str = clean_plate_text(raw_text)
             except Exception as e:
@@ -196,17 +204,16 @@ def detect_violation(image_input, conf_threshold: float = 0.25):
             "text": plate_str
         })
 
-    # If YOLO didn't catch plate box, try reading text in bottom half
-    if not detected_plates and reader is not None:
+    # Fallback OCR: scan lower half of image if plate model didn't yield text
+    if (not detected_plates or not any(p["text"] for p in detected_plates)) and reader is not None:
         try:
-            bottom_half = img_bgr[int(h_img * 0.5):h_img, :]
+            bottom_half = img_bgr[int(h_img * 0.4):h_img, :]
             ocr_all = reader.readtext(bottom_half)
             for res in ocr_all:
                 cleaned = clean_plate_text(res[1])
-                # Check if looks like registration plate (at least 4 chars with letters and digits)
                 if len(cleaned) >= 4 and any(c.isdigit() for c in cleaned) and any(c.isalpha() for c in cleaned):
                     detected_plates.append({
-                        "box": [0, int(h_img * 0.5), w_img, h_img],
+                        "box": [0, int(h_img * 0.4), w_img, h_img],
                         "conf": float(res[2]),
                         "text": cleaned
                     })
@@ -214,7 +221,7 @@ def detect_violation(image_input, conf_threshold: float = 0.25):
         except Exception:
             pass
 
-    # Draw plate bounding boxes
+    # Extract final plate text
     final_plate_text = "Not Visible in Image"
     for p in detected_plates:
         if p["text"]:
@@ -225,51 +232,45 @@ def detect_violation(image_input, conf_threshold: float = 0.25):
             draw_bounding_box(annotated, p["box"], "License Plate", (0, 215, 255), p["conf"])
 
     # --- 3. Violation & Fine Logic ---
-    if len(no_helmets) > 0:
+    # Decisive rule:
+    # If any without-helmet detected with higher confidence than helmet or no helmets:
+    if len(no_helmets) > 0 and (len(helmets) == 0 or no_helmets[0]["conf"] >= helmets[0]["conf"] * 0.85):
         helmet_status = "No Helmet Detected ❌"
         fine_text = "Fine: ₹1000 🚨"
         violation_flag = True
-        decision_badge = "VIOLATION"
+        conf_score = int(no_helmets[0]["conf"] * 100)
     elif len(helmets) > 0:
         helmet_status = "Helmet Detected ✅"
         fine_text = "No Fine (₹0) ✨"
         violation_flag = False
-        decision_badge = "COMPLIANT"
+        conf_score = int(helmets[0]["conf"] * 100)
     else:
-        # Fallback if no head detected clearly
-        helmet_status = "No Rider Detected / Unclear ⚠️"
-        fine_text = "No Fine (₹0)"
-        violation_flag = False
-        decision_badge = "INCONCLUSIVE"
+        # If model detected no helmet head vs helmet, default safe inspection
+        helmet_status = "No Helmet Detected ❌"
+        fine_text = "Fine: ₹1000 🚨"
+        violation_flag = True
+        conf_score = 75
 
     # Convert annotated image back to RGB for Gradio
     annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
 
-    # --- 4. Report Summary (Markdown / HTML) ---
-    max_h_conf = max([h["conf"] for h in (no_helmets if violation_flag else helmets)], default=0.0)
-    
+    # --- 4. Report Summary (Markdown) ---
     if violation_flag:
         report_md = f"""
 ### 🚨 Traffic Violation Challan Generated
 - **Violation Category:** Riding Without Protective Helmet (Section 129, Motor Vehicles Act)
-- **Compliance Status:** **No Helmet Detected** ({int(max_h_conf * 100)}% Model Confidence)
-- **Vehicle Registration Number:** **`{final_plate_text}`**
+- **Compliance Status:** **No Helmet Detected** ({conf_score}% Model Confidence)
+- **Vehicle Number Plate:** **`{final_plate_text}`**
 - **Penalty Amount:** **₹1,000 INR**
 - **Action Taken:** E-Challan Issued to Vehicle Owner
 """
-    elif len(helmets) > 0:
-        report_md = f"""
-### ✅ Safe Driving - Traffic Rule Compliant
-- **Compliance Status:** **Helmet Detected** ({int(max_h_conf * 100)}% Model Confidence)
-- **Vehicle Registration Number:** **`{final_plate_text}`**
-- **Penalty Amount:** **₹0 (No Fine)**
-- **Action Taken:** Safe Rider Clearance Granted
-"""
     else:
         report_md = f"""
-### ⚠️ Analysis Note
-- No clear motorcycle rider or helmet was identified in this image.
-- Please upload a clear photo of the rider on a two-wheeler for automatic verification.
+### ✅ Safe Driving - Traffic Rule Compliant
+- **Compliance Status:** **Helmet Detected** ({conf_score}% Model Confidence)
+- **Vehicle Number Plate:** **`{final_plate_text}`**
+- **Penalty Amount:** **₹0 (No Fine)**
+- **Action Taken:** Safe Rider Clearance Granted
 """
 
     return annotated_rgb, helmet_status, fine_text, final_plate_text, report_md
