@@ -251,8 +251,9 @@ def detect_violation(image_input, conf_threshold: float = 0.20):
         violation_flag = True
         conf_score = 75
 
-    # Convert annotated image back to RGB for Gradio
-    annotated_rgb = cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB)
+    # Convert annotated image to PIL Image for reliable serialization across all Gradio versions
+    from PIL import Image
+    annotated_pil = Image.fromarray(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
 
     # --- 4. Report Summary (Markdown) ---
     if violation_flag:
@@ -273,4 +274,4 @@ def detect_violation(image_input, conf_threshold: float = 0.20):
 - **Action Taken:** Safe Rider Clearance Granted
 """
 
-    return annotated_rgb, helmet_status, fine_text, final_plate_text, report_md
+    return annotated_pil, helmet_status, fine_text, final_plate_text, report_md
