@@ -251,9 +251,14 @@ def detect_violation(image_input, conf_threshold: float = 0.20):
         violation_flag = True
         conf_score = 75
 
-    # Convert annotated image to PIL Image for reliable serialization across all Gradio versions
-    from PIL import Image
-    annotated_pil = Image.fromarray(cv2.cvtColor(annotated, cv2.COLOR_BGR2RGB))
+    # Encode annotated image as base64 data URI for 100% reliable rendering without any proxy/404 issues
+    import base64
+    success, buffer = cv2.imencode('.jpg', annotated, [int(cv2.IMWRITE_JPEG_QUALITY), 90])
+    if success:
+        b64_str = base64.b64encode(buffer).decode('utf-8')
+        annotated_html = f'<img src="data:image/jpeg;base64,{b64_str}" style="width: 100%; max-height: 500px; object-fit: contain; border-radius: 8px; border: 1px solid #E5E7EB;" alt="Annotated Output" />'
+    else:
+        annotated_html = "<p>Image processing error.</p>"
 
     # --- 4. Report Summary (Markdown) ---
     if violation_flag:
@@ -274,4 +279,4 @@ def detect_violation(image_input, conf_threshold: float = 0.20):
 - **Action Taken:** Safe Rider Clearance Granted
 """
 
-    return annotated_pil, helmet_status, fine_text, final_plate_text, report_md
+    return annotated_html, helmet_status, fine_text, final_plate_text, report_md

@@ -41,8 +41,9 @@ def create_app():
 
             # Right Column: Output & Details
             with gr.Column(scale=1):
-                annotated_output = gr.Image(
+                annotated_output = gr.HTML(
                     label="🖼️ Annotated Deep Learning Output",
+                    value="<div style='display:flex;justify-content:center;align-items:center;height:300px;background:#F9FAFB;border-radius:8px;border:1px dashed #D1D5DB;color:#6B7280;'>Upload image and click Analyze Violation to view detection</div>",
                     elem_id="output_image"
                 )
 
